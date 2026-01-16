@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { Droplets, Sun, Thermometer, Wind, RefreshCw, AlertCircle, Download, Moon, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area } from 'recharts';
+import * as XLSX from 'xlsx';
 
 function App() {
   const [data, setData] = useState([]);
@@ -70,29 +71,66 @@ function App() {
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  const exportToCSV = () => {
+  const exportToExcel = () => {
     if (data.length === 0) return;
     
-    const headers = ['Timestamp', 'Device ID', 'Soil Moisture (%)', 'Temperature (°C)', 'Humidity (%)', 'Light (lux)'];
-    const csvContent = [
-      headers.join(','),
-      ...data.map(d => [
-        new Date(d.timestamp).toLocaleString(),
-        d.device_id,
-        d.soil_moisture,
-        d.temperature,
-        d.humidity,
-        d.light_lux
-      ].join(','))
-    ].join('\n');
+    // Group data by 10-day periods
+    const groupedData = {};
     
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `plant-data-${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
+    data.forEach(reading => {
+      const date = new Date(reading.timestamp);
+      const dayOfMonth = date.getDate();
+      
+      let periodStart, periodEnd;
+      
+      if (dayOfMonth <= 10) {
+        periodStart = 1;
+        periodEnd = 10;
+      } else if (dayOfMonth <= 20) {
+        periodStart = 11;
+        periodEnd = 20;
+      } else {
+        periodStart = 21;
+        periodEnd = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+      }
+      
+      const monthName = date.toLocaleString('en-US', { month: 'short' });
+      const year = date.getFullYear();
+      const sheetName = `${periodStart}-${periodEnd} ${monthName} ${year}`;
+      
+      if (!groupedData[sheetName]) {
+        groupedData[sheetName] = [];
+      }
+      
+      groupedData[sheetName].push({
+        'Timestamp': new Date(reading.timestamp).toLocaleString(),
+        'Device ID': reading.device_id,
+        'Soil Moisture (%)': reading.soil_moisture?.toFixed(1),
+        'Temperature (°C)': reading.temperature?.toFixed(1),
+        'Humidity (%)': reading.humidity?.toFixed(1),
+        'Light (lux)': reading.light_lux?.toFixed(1)
+      });
+    });
+    
+    const workbook = XLSX.utils.book_new();
+    
+    Object.keys(groupedData).sort().reverse().forEach(sheetName => {
+      const worksheet = XLSX.utils.json_to_sheet(groupedData[sheetName]);
+      
+      worksheet['!cols'] = [
+        { wch: 20 },
+        { wch: 15 },
+        { wch: 18 },
+        { wch: 18 },
+        { wch: 15 },
+        { wch: 12 }
+      ];
+      
+      XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+    });
+    
+    const fileName = `plant-data-${new Date().toISOString().split('T')[0]}.xlsx`;
+    XLSX.writeFile(workbook, fileName);
   };
 
   const calculateStats = (field) => {
@@ -235,11 +273,11 @@ function App() {
                 {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
               </button>
               <button
-                onClick={exportToCSV}
+                onClick={exportToExcel}
                 className="bg-blue-500 text-white px-4 py-3 rounded-lg hover:bg-blue-600 transition flex items-center gap-2"
-              >
-                <Download className="w-5 h-5" />
-                Export CSV
+>
+                 <Download className="w-5 h-5" />
+                  Export Excel
               </button>
               <button
                 onClick={fetchData}
